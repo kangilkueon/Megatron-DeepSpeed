@@ -5,6 +5,10 @@ BASE_PATH=/vc_data/Megatron-LM/data
 DATA_PATH=${BASE_PATH}/indexed_datasets/megatron
 DS_CONFIG=ds_config.json
 
+DATA_PATH=./dataset/BookCorpusDataset_text_document
+CHECKPOINT_PATH=./dataset/checkpoint
+BASE_PATH=./dataset
+
 TP=1
 PP=1
 NLAYERS=24
@@ -48,7 +52,8 @@ ds_args=" --zero-stage=$ZERO_STAGE ${ds_args}"
 ds_args=" --deepspeed-activation-checkpointing ${ds_args}"
 
 
-deepspeed pretrain_gpt.py \
+#deepspeed pretrain_gpt.py \
+python pretrain_gpt.py \
     --tensor-model-parallel-size $TP \
     --pipeline-model-parallel-size $PP \
     --num-layers $NLAYERS \
@@ -59,7 +64,8 @@ deepspeed pretrain_gpt.py \
     --max-position-embeddings 1024 \
     --micro-batch-size 4 \
     --global-batch-size 1024 \
-    --train-iters 1000 \
+    --train-iters 1 \
+    --lr 6.0e-5 \
     --lr 6.0e-5 \
     --min-lr 6.0e-6 \
     --lr-decay-style cosine \
@@ -69,7 +75,7 @@ deepspeed pretrain_gpt.py \
     --data-path $DATA_PATH \
     --vocab-file $BASE_PATH/gpt2-vocab.json \
     --merge-file $BASE_PATH/gpt2-merges.txt \
-    --save-interval 1000 \
+    --save-interval 1 \
     --split 98,2,0 \
     --clip-grad 1.0 \
     --weight-decay 0.1 \
@@ -80,5 +86,6 @@ deepspeed pretrain_gpt.py \
     --checkpoint-activations \
     --tensorboard-dir $OUTPUT_DIR \
     $ds_args \
-    --exit-interval 5000 | tee ${OUTPUT_DIR}/output.log
+	--save /mnt/ssd/checkpoint_test \
+    --exit-interval 5000 | tee ${OUTPUT_DIR}/output.log 
 
