@@ -8,11 +8,14 @@ DS_CONFIG=ds_config.json
 DATA_PATH=./dataset/BookCorpusDataset_text_document
 CHECKPOINT_PATH=./dataset/checkpoint
 BASE_PATH=./dataset
+SAVE_PATH=$1/gds
+
+mkdir -p $SAVE_PATH
 
 TP=1
 PP=1
 NLAYERS=24
-HIDDEN=512
+HIDDEN=2048 # 2048 - 18GB
 
 GLOBAL_BATCH=64
 MICRO_BATCH=4
@@ -86,6 +89,6 @@ python pretrain_gpt.py \
     --checkpoint-activations \
     --tensorboard-dir $OUTPUT_DIR \
     $ds_args \
-	--save /mnt/ssd/checkpoint_test \
+	--save $SAVE_PATH \
     --exit-interval 5000 | tee ${OUTPUT_DIR}/output.log 
 

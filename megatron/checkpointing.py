@@ -24,6 +24,7 @@ import pickle
 import torch
 import cupy
 import kvikio
+import kvikio.defaults
 
 from megatron import (get_args,
                       is_rank_0,
@@ -124,7 +125,7 @@ def get_tensor(d, f, offset=0):
     elif torch.is_tensor(d):
         try:
             if d.is_cuda:
-                offset = offset + f.write(d, file_offset=offset)
+                offset = offset + f.write(cupy.asarray(d), file_offset=offset)
             else:
                 offset = offset + f.write(np.asarray(d), file_offset=offset)
         except Exception as e:
@@ -148,6 +149,44 @@ def get_tensor(d, f, offset=0):
             print("[6]   SIZE : ", sys.getsizeof(d))
     return offset
 
+def get_tensor1(d, l, cl):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            get_tensor1(v, l, cl)
+    elif isinstance(d, list):
+        for v in d:
+            get_tensor1(v, l, cl)
+    elif isinstance(d, tuple):
+        #print("[3]   tuple : ", type(d), d)
+        for v in d:
+            get_tensor1(v, l, cl)
+    elif torch.is_tensor(d):
+        #print("ID : ", hex(id(d)))
+        #print(d.is_cuda)
+        try:
+            if d.is_cuda == True:
+                l.append(d)
+            elif d.is_cuda == False:
+                cl.append(d)
+
+        except Exception as e:
+            print(e)
+            print("[5]   Kye : ", d)
+            print("[5]   type : ", type(d))
+            print("[5]   ID : ", hex(id(d)))
+            print("[5]   SIZE : ", sys.getsizeof(d))
+            #cl.append(d.detach())
+    else:
+        #print("[4]   type : ", type(d))
+        try:
+            cl.append(np.asarray(d))
+        except Exception as e:
+            print(e)
+            print("[6]   Kye : ", d)
+            print("[6]   type : ", type(d))
+            print("[6]   ID : ", hex(id(d)))
+            print("[6]   SIZE : ", sys.getsizeof(d))
+
 def save_checkpoint(iteration, model, optimizer, lr_scheduler):
     """Save a model checkpoint."""
     args = get_args()
@@ -161,7 +200,8 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
     checkpoint_fname = get_checkpoint_name(args.save, iteration)
     for _ in range(2):
         checkpoint_fname = os.path.dirname(checkpoint_fname)
-    print("[$$] ####################CHECKPOINT ################################### : ", checkpoint_fname)
+    print("[$$] #################### CHECKPOINT ################################### : ", checkpoint_fname)
+    print("[$$] #################### CHECKPOINT ################################### : ", kvikio.defaults.compat_mode())
     if not torch.distributed.is_initialized() or mpu.get_data_parallel_rank() == 0 \
         or args.deepspeed:
         # Arguments, iteration, and model.
@@ -188,15 +228,23 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
                     state_dict['lr_scheduler'] = lr_scheduler.state_dict()
 
         # RNG states.
+        count = 0
+        size = 0
         if not args.no_save_rng:
             #"""
-            f = kvikio.CuFile(checkpoint_fname + "_etc1", "w")
-            get_tensor(random.getstate(), f)
-            get_tensor(np.random.get_state(), f)
-            get_tensor(torch.get_rng_state(), f)
-            get_tensor(torch.cuda.get_rng_state(), f)
-            get_tensor(mpu.get_cuda_rng_tracker().get_states(), f)
-            f.close()
+            l = []
+            cl = []
+
+            get_tensor1(random.getstate(), l, cl)
+            get_tensor1(np.random.get_state(), l, cl)
+            get_tensor1(torch.get_rng_state(), l, cl)
+            get_tensor1(torch.cuda.get_rng_state(), l, cl)
+            get_tensor1(mpu.get_cuda_rng_tracker().get_states(), l, cl)
+            for i in l:
+                f = kvikio.CuFile(checkpoint_fname + "_" + str(count) + "_etc1", "w")
+                size += f.write(i.detach())
+                count += 1
+                f.close()
             
             """
             state_dict['random_rng_state'] = random.getstate()
@@ -263,33 +311,46 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
                      ds_version=version)
         state.update(client_state)
         """
-        f = kvikio.CuFile(checkpoint_fname + "_model", "w")
-        offset = 0;
-        offset = get_tensor(model[0].module_state_dict(), f, offset)
-        #offset = get_tensor(model[0].optimizer.state_dict(), f, offset)
-        offset = get_tensor(model[0]._get_zero_param_shapes(), f, offset)
-        offset = get_tensor(model[0].lr_scheduler.state_dict(), f, offset)
-        offset = get_tensor(model[0].sparse_tensor_module_names, f, offset)
-        offset = get_tensor(model[0].skipped_steps, f, offset)
-        offset = get_tensor(model[0].global_steps, f, offset)
-        offset = get_tensor(model[0].global_samples, f, offset)
-        offset = get_tensor(model[0].dp_world_size, f, offset)
-        offset = get_tensor(model[0].sparse_tensor_module_names, f, offset)
-        offset = get_tensor(model[0].mp_world_size, f, offset)
-        f.close()
+        l = []
+        cl = []
+        get_tensor1(model[0].module_state_dict(), l, cl)
+        #get_tensor1(model[0].optimizer.state_dict(), l, cl)
+        get_tensor1(model[0]._get_zero_param_shapes(), l, cl)
+        get_tensor1(model[0].lr_scheduler.state_dict(), l, cl)
+        get_tensor1(model[0].sparse_tensor_module_names, l, cl)
+        get_tensor1(model[0].skipped_steps, l, cl)
+        get_tensor1(model[0].global_steps, l, cl)
+        get_tensor1(model[0].global_samples, l, cl)
+        get_tensor1(model[0].dp_world_size, l, cl)
+        get_tensor1(model[0].sparse_tensor_module_names, l, cl)
+        get_tensor1(model[0].mp_world_size, l, cl)
+        for i in l:
+            f = kvikio.CuFile(checkpoint_fname + "_" + str(count) + "_model", "w")
+            count += 1
+            size += f.write(i.detach())
+            f.close()
+            
 
-        """
+        """a = cupy.arange(203879608/8)
+        f.write(a)
+
         zero_sd = dict(optimizer_state_dict=self.optimizer.state_dict(),
                        ds_config=self.config,
                        ds_version=version)
         """
-        f = kvikio.CuFile(checkpoint_fname + "_model_zero", "w")
-        offset = 0;
-        offset = get_tensor(model[0].optimizer.state_dict(), f, offset)
-        offset = get_tensor(model[0].config, f, offset)
-        f.close()
 
-        """
+        l = []
+        cl = []
+        get_tensor1(model[0].optimizer.state_dict(), l, cl)
+        get_tensor1(model[0].config, l, cl)
+        for i in l:
+            f = kvikio.CuFile(checkpoint_fname + "_" + str(count) + "_model", "w")
+            count += 1
+            size += f.write(i.detach())
+            f.close()
+
+        """a = cupy.arange(1223258524/8)
+        f.write(a)
         print("TEST", model[0].has_moe_layers)
         print("TEST", model[0].save_non_zero_checkpoint)
         print("TEST", model[0].save_zero_checkpoint)
@@ -315,6 +376,8 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
     # Wait so everyone is done (not necessary)
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
+
+    print("[$$] GDS Saved Size : ", size)
 
 def _transpose_first_dim(t, num_splits, num_splits_first, model):
     input_shape = t.size()
